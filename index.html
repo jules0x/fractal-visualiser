@@ -1,185 +1,37 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AETHER - Mathematical Visualizer Studio</title>
-    <link rel="stylesheet" href="style.css">
-    <!-- Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
-</head>
-<body>
-    <div class="app-container">
-        <!-- Main Rendering Canvas -->
-        <canvas id="math-canvas"></canvas>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>AETHER — Deep Fractal Explorer</title>
+    <meta
+      name="description"
+      content="Arbitrary-precision fractal explorer: perturbation rendering with BigInt reference orbits, past the depth float64 can reach."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Outfit:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <canvas id="stage" aria-label="Fractal viewport"></canvas>
 
-        <!-- Subtle Floating UI Toggle Trigger (Top Right / Bottom Right) -->
-        <button class="ui-toggle-trigger" id="ui-toggle-btn" title="Toggle Controls Overlay (Press 'H' or Click)">
-            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none">
-                <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
-                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg>
-        </button>
-
-        <!-- Top Header & Algorithm Selector -->
-        <header class="app-header" id="app-header">
-            <div class="brand">
-                <div class="brand-icon">
-                    <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none">
-                        <circle cx="12" cy="12" r="9"/>
-                        <path d="M12 3a9 9 0 0 1 9 9M12 7a5 5 0 0 1 5 5"/>
-                    </svg>
-                </div>
-                <div class="brand-text">
-                    <h1>AETHER</h1>
-                    <span class="subtitle">MATH ALGORITHM STUDIO</span>
-                </div>
-            </div>
-
-            <!-- Algorithm Mode Tabs -->
-            <nav class="algorithm-nav">
-                <button class="nav-btn active" data-mode="julia">Julia Set</button>
-                <button class="nav-btn" data-mode="mandelbrot">Mandelbrot</button>
-                <button class="nav-btn" data-mode="newton">Newton Fractal</button>
-            </nav>
-        </header>
-
-        <!-- Dynamic Control Sidebar / Floating Panel -->
-        <aside class="control-panel" id="control-panel">
-            <div class="panel-header">
-                <h2 id="current-algorithm-title">Julia Set Visualizer</h2>
-                <span class="badge" id="render-backend-tag">WebGL 2.0</span>
-            </div>
-
-            <div class="panel-body">
-                <!-- Mathematical Formula HUD -->
-                <div class="formula-box">
-                    <span class="formula-label">Current System Formula</span>
-                    <div class="formula-display" id="formula-display">f(z) = z² + c</div>
-                </div>
-
-                <!-- Live Parameter Readout HUD -->
-                <div class="hud-readout">
-                    <div class="hud-item">
-                        <span class="hud-label">FPS</span>
-                        <span class="hud-value" id="fps-val">60</span>
-                    </div>
-                    <div class="hud-item">
-                        <span class="hud-label">FRAME TIME</span>
-                        <span class="hud-value" id="ms-val">16.6ms</span>
-                    </div>
-                    <div class="hud-item">
-                        <span class="hud-label">GPU LOAD</span>
-                        <span class="hud-value" id="load-val">LOW</span>
-                    </div>
-                </div>
-                <div class="hud-readout secondary-hud">
-                    <div class="hud-item">
-                        <span class="hud-label">ZOOM LEVEL</span>
-                        <span class="hud-value" id="zoom-val">1.00x</span>
-                    </div>
-                    <div class="hud-item">
-                        <span class="hud-label">COORDINATE CENTER</span>
-                        <span class="hud-value" id="coord-val">0.00, 0.00</span>
-                    </div>
-                </div>
-
-                <!-- Presets dropdown and Custom Preset Saver -->
-                <div class="control-group">
-                    <label for="preset-select">Presets Library</label>
-                    <div class="preset-input-row">
-                        <select id="preset-select" class="custom-select">
-                            <!-- Populated by JS -->
-                        </select>
-                        <button class="btn btn-secondary btn-icon" id="delete-preset-btn" title="Delete Selected Custom Preset">✕</button>
-                    </div>
-                </div>
-
-                <!-- Save Current Custom State -->
-                <div class="control-group">
-                    <label for="preset-name-input">Save Current Scene State</label>
-                    <div class="preset-input-row">
-                        <input type="text" id="preset-name-input" class="custom-text-input" placeholder="Name your scene state...">
-                        <button class="btn btn-primary" id="save-preset-btn">Save Preset</button>
-                    </div>
-                </div>
-
-                <hr class="divider">
-
-                <!-- Dynamic Slider Controls (Toggled by active mode) -->
-                <div class="sliders-container" id="sliders-container">
-                    <!-- Dynamic slider elements built by app.js -->
-                </div>
-
-                <hr class="divider">
-
-                <!-- Iterations & Performance Controls -->
-                <div class="control-group">
-                    <div class="label-row">
-                        <label for="iterations-slider">Max Iterations</label>
-                        <span class="val-badge" id="iterations-val">120</span>
-                    </div>
-                    <input type="range" id="iterations-slider" min="10" max="1000" step="10" value="120">
-                </div>
-
-                <!-- Palette Selector (8 Curated Themes) -->
-                <div class="control-group">
-                    <label>Color Palette</label>
-                    <div class="palette-options" id="palette-options">
-                        <button class="palette-btn active" data-palette="electric" title="Electric Nebula" style="background: linear-gradient(90deg, #0d0630, #6b7fd7, #d4afb9, #d16014);"></button>
-                        <button class="palette-btn" data-palette="purpleOrange" title="Purple & Orange Sunset" style="background: linear-gradient(90deg, #1b003a, #5c007a, #b80086, #ff5722, #ffb74d);"></button>
-                        <button class="palette-btn" data-palette="toxic" title="Toxic Waste (Green & Purple)" style="background: linear-gradient(90deg, #051907, #00ff66, #7928ca, #ff0080);"></button>
-                        <button class="palette-btn" data-palette="cyber" title="Neon Cyberpunk" style="background: linear-gradient(90deg, #03001e, #7303c0, #ec38bc, #fdeff9);"></button>
-                        <button class="palette-btn" data-palette="emerald" title="Bioluminescent Emerald" style="background: linear-gradient(90deg, #00221c, #005646, #00a88f, #45f3c2, #ffffff);"></button>
-                        <button class="palette-btn" data-palette="fire" title="Inferno Fire" style="background: linear-gradient(90deg, #000000, #800000, #ff4500, #ffa500, #ffff00);"></button>
-                        <button class="palette-btn" data-palette="gold" title="Royal Gold & Obsidian" style="background: linear-gradient(90deg, #050505, #4a3b00, #d4af37, #fff7bd, #ffffff);"></button>
-                        <button class="palette-btn" data-palette="cosmic" title="Cosmic Deep Space" style="background: linear-gradient(90deg, #020014, #0f1c3f, #1f4287, #07b1e8, #e3f2fd);"></button>
-                    </div>
-                </div>
-
-                <!-- Palette Frequency / Band Density -->
-                <div class="control-group">
-                    <div class="label-row">
-                        <label for="color-shift-slider">Color Band Density</label>
-                        <span class="val-badge" id="color-shift-val">1.0</span>
-                    </div>
-                    <input type="range" id="color-shift-slider" min="0.1" max="5" step="0.1" value="1.0">
-                </div>
-
-                <!-- Flowing Animation Speed -->
-                <div class="control-group">
-                    <div class="label-row">
-                        <label for="flow-speed-slider">Flow Animation Speed</label>
-                        <span class="val-badge" id="flow-speed-val">1.0</span>
-                    </div>
-                    <input type="range" id="flow-speed-slider" min="0" max="5" step="0.1" value="1.0">
-                </div>
-
-                <!-- Continuous Auto-Zoom Speed -->
-                <div class="control-group">
-                    <div class="label-row">
-                        <label for="auto-zoom-slider">Continuous Auto-Zoom</label>
-                        <span class="val-badge" id="auto-zoom-val">OFF</span>
-                    </div>
-                    <input type="range" id="auto-zoom-slider" min="-2" max="2" step="0.1" value="0">
-                </div>
-            </div>
-
-            <div class="panel-footer">
-                <button class="btn btn-secondary" id="stop-zoom-btn">Stop Zoom</button>
-                <button class="btn btn-secondary" id="reset-view-btn">Reset View</button>
-                <button class="btn btn-primary" id="snapshot-btn">Export HD</button>
-            </div>
-        </aside>
-
-        <!-- Canvas Instructions Overlay -->
-        <div class="canvas-hints" id="canvas-hints">
-            <span>🖱️ Drag to Pan &bull; Double-Click to Zoom &bull; Scroll to Zoom &bull; Shift+Drag to Morph &bull; 'H' to Hide Controls</span>
-        </div>
+    <div id="crosshair" class="crosshair" aria-hidden="true">
+      <svg viewBox="0 0 40 40" width="40" height="40">
+        <path d="M20 5v10M20 25v10M5 20h10M25 20h10" />
+        <circle cx="20" cy="20" r="2" />
+      </svg>
     </div>
 
-    <script src="app.js"></script>
-</body>
+    <div id="readout" class="readout"></div>
+    <aside id="panel" class="panel" aria-label="Controls"></aside>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <div id="fatal" class="fatal" hidden></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
 </html>
