@@ -98,13 +98,13 @@ export function clampFlight(velocity: number): number {
  * which the machine holds that frame rate. The gap is 48 to 55 now, where it
  * used to be 40 to 75, wide enough to strand a view that was comfortably fast.
  */
-const SCALE_DOWN_FPS = 48;
-const SCALE_UP_FPS = 55;
-const SCALE_STEP = 1.18;
+const SCALE_DOWN_FPS = 35;
+const SCALE_UP_FPS = 52;
+const SCALE_STEP = 1.08;
 
 export function adaptScale(current: number, fps: number): number {
   let next = current;
   if (fps < SCALE_DOWN_FPS) next = current / SCALE_STEP;
   else if (fps > SCALE_UP_FPS) next = current * SCALE_STEP;
-  return Math.max(0.25, Math.min(1, next));
+  return Math.max(0.85, Math.min(1, next));
 }

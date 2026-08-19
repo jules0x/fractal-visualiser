@@ -17,9 +17,9 @@ export type Category = 'fractal' | 'visual';
  * handful of sliders, which is also the surface a future audio input would
  * drive: see `u_audioLevel` / `u_audioBands` in visualShaders.ts.
  */
-export type VisualMode = 'flow' | 'plasma' | 'kaleido' | 'mandala' | 'cosmic' | 'tunnel' | 'cybergrid' | 'nebula' | 'spiral' | 'droste' | 'phyllotaxis' | 'domain' | 'voronoi' | 'attractor' | 'rorschach' | 'sierpinski' | 'lightning';
+export type VisualMode = 'flow' | 'plasma' | 'kaleido' | 'mandala' | 'cosmic' | 'tunnel' | 'cybergrid' | 'nebula' | 'spiral' | 'droste' | 'phyllotaxis' | 'domain' | 'voronoi' | 'attractor' | 'rorschach' | 'sierpinski' | 'lightning' | 'multiplyRidge' | 'isoContour' | 'curlFlow' | 'reactionWeb' | 'orbitTrap' | 'cellWall' | 'transitTrap';
 
-export const VISUAL_MODES: readonly VisualMode[] = ['flow', 'plasma', 'kaleido', 'mandala', 'cosmic', 'tunnel', 'cybergrid', 'nebula', 'spiral', 'droste', 'phyllotaxis', 'domain', 'voronoi', 'attractor', 'rorschach', 'sierpinski', 'lightning'];
+export const VISUAL_MODES: readonly VisualMode[] = ['flow', 'plasma', 'kaleido', 'mandala', 'cosmic', 'tunnel', 'cybergrid', 'nebula', 'spiral', 'droste', 'phyllotaxis', 'domain', 'voronoi', 'attractor', 'rorschach', 'sierpinski', 'lightning', 'multiplyRidge', 'isoContour', 'curlFlow', 'reactionWeb', 'orbitTrap', 'cellWall', 'transitTrap'];
 
 export const VISUAL_MODE_LABELS: Record<VisualMode, string> = {
   flow: 'Flow Field',
@@ -39,6 +39,13 @@ export const VISUAL_MODE_LABELS: Record<VisualMode, string> = {
   rorschach: 'Biomorph',
   sierpinski: 'Sierpiński',
   lightning: 'Lightning',
+  multiplyRidge: 'Multiply Ridge',
+  isoContour: 'Iso Contour',
+  curlFlow: 'Curl Flow',
+  reactionWeb: 'Reaction Web',
+  orbitTrap: 'Orbit Trap',
+  cellWall: 'Cell Wall',
+  transitTrap: 'Transit Trap',
 };
 
 export interface ModeParams {
@@ -105,6 +112,37 @@ export function defaultParams(): ModeParams {
 
 export function defaultVisualParams(): VisualParams {
   return { speed: 1, warp: 1, complexity: 4, symmetry: 6, zoom: 1 };
+}
+
+export interface VisualModeState {
+  visualParams: VisualParams;
+  palette: string;
+  colorDensity: number;
+  flowSpeed: number;
+  hueSpin: number;
+}
+
+export interface FractalModeState {
+  cx: string;
+  cy: string;
+  z: number;
+  params: ModeParams;
+  iterations: number;
+  palette: string;
+  colorDensity: number;
+  flowSpeed: number;
+  hueSpin: number;
+  antialias: boolean;
+}
+
+export function defaultVisualState(): VisualModeState {
+  return {
+    visualParams: defaultVisualParams(),
+    palette: 'electric',
+    colorDensity: 1,
+    flowSpeed: 0,
+    hueSpin: 0,
+  };
 }
 
 export function defaultSettings(): Settings {

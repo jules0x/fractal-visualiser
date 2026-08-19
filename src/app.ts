@@ -14,7 +14,20 @@ import {
 } from './core/reference.ts';
 import { adaptScale, clampFlight, decayFlight } from './core/tuning.ts';
 import { Renderer, SHADER_MODE, VISUAL_SHADER_MODE } from './render/renderer.ts';
-import { defaultSettings, defaultVisualParams, type FractalMode, type Settings } from './state/types.ts';
+import {
+  defaultParams,
+  defaultSettings,
+  defaultVisualParams,
+  defaultVisualState,
+  MODES,
+  VISUAL_MODES,
+  type Category,
+  type FractalMode,
+  type FractalModeState,
+  type Settings,
+  type VisualMode,
+  type VisualModeState,
+} from './state/types.ts';
 import { loadPrefs, savePrefs, type Prefs } from './state/prefs.ts';
 import {
   buildShareUrl,
@@ -24,27 +37,13 @@ import {
 } from './state/urlstate.ts';
 import { PRESETS, radiusToLog2Zoom, type Preset } from './state/presets.ts';
 
-// Bumped whenever a field is added to ViewState — an older session would
-// otherwise restore with that field missing (e.g. `undefined`) rather than
-// defaulted, which for a number like hueSpin turns into NaN once it reaches
-// arithmetic.
-const SESSION_KEY = 'aether.session.v4';
+const SESSION_KEY = 'aether.session.v5';
 
 /** How long after the last input the view is still considered "in motion". */
 const SETTLE_MS = 170;
 /** Steering speed in half-screens per second. */
 const STEER_SPEED = 0.85;
 
-/**
- * Where to try seeding a Newton reference, in normalised view units, in order.
- *
- * The centre first, which is best conditioned when it works. After that,
- * points spread around the frame and off both axes, so a symmetric view cannot
- * keep landing on the same singularity. A view sitting *on* the pole needs
- * several tries: everything on screen is close to the origin there, and it is
- * the distance from the origin that decides whether the orbit stays inside
- * float32.
- */
 const REFERENCE_SEEDS: readonly [number, number][] = [
   [0, 0],
   [0.5, 0.25],
@@ -53,11 +52,46 @@ const REFERENCE_SEEDS: readonly [number, number][] = [
   [-0.68, -0.79],
 ];
 
+function createDefaultFractalStates(): Record<FractalMode, FractalModeState> {
+  const res = {} as Record<FractalMode, FractalModeState>;
+  for (const m of MODES) {
+    const p = PRESETS[m][0];
+    const z = radiusToLog2Zoom(p.radius);
+    res[m] = {
+      cx: p.cx,
+      cy: p.cy,
+      z,
+      iterations: p.iterations,
+      palette: 'electric',
+      colorDensity: 1,
+      flowSpeed: 0,
+      hueSpin: 0,
+      antialias: false,
+      params: {
+        ...defaultParams(),
+        ...(p.params ?? {}),
+      },
+    };
+  }
+  return res;
+}
+
+function createDefaultVisualStates(): Record<VisualMode, VisualModeState> {
+  const res = {} as Record<VisualMode, VisualModeState>;
+  for (const m of VISUAL_MODES) {
+    res[m] = defaultVisualState();
+  }
+  return res;
+}
+
 export class App {
   readonly vp = new Viewport();
   readonly renderer: Renderer;
   settings: Settings = defaultSettings();
   prefs: Prefs = loadPrefs();
+
+  fractalStates: Record<FractalMode, FractalModeState> = createDefaultFractalStates();
+  visualStates: Record<VisualMode, VisualModeState> = createDefaultVisualStates();
 
   /**
    * Zoom velocity in powers of two per second. A scroll gesture adds thrust and
@@ -107,7 +141,7 @@ export class App {
   private cssW = 1;
   private cssH = 1;
   /** Scale used while the view is moving; adapts to the measured frame rate. */
-  private motionScale = 0.6;
+  private motionScale = 1.0;
   private interactUntil = 0;
 
   // Cache keys for the reference orbit.
@@ -174,16 +208,115 @@ export class App {
     savePrefs(this.prefs);
   }
 
-  /**
-   * Where zooming converges. Cursor-anchored is what people expect from maps;
-   * centre-anchored keeps the pointer free and is steadier once the view is
-   * deep enough that a small hand movement covers a lot of ground.
-   */
   private anchor(): [number, number] {
     if (this.prefs.zoomAnchor === 'cursor' && this.pointer.inside) {
       return [this.pointer.nx, this.pointer.ny];
     }
     return [0, 0];
+  }
+
+  syncActiveModeState(): void {
+    if (this.settings.category === 'visual') {
+      const vmode = this.settings.visualMode;
+      this.visualStates[vmode] = {
+        visualParams: { ...this.settings.visualParams },
+        palette: this.settings.palette,
+        colorDensity: this.settings.colorDensity,
+        flowSpeed: this.settings.flowSpeed,
+        hueSpin: this.settings.hueSpin,
+      };
+    } else {
+      const fmode = this.settings.mode;
+      const digits = this.vp.displayDigits;
+      this.fractalStates[fmode] = {
+        cx: this.vp.ctx.toString(this.vp.tcx, digits),
+        cy: this.vp.ctx.toString(this.vp.tcy, digits),
+        z: this.vp.tLog2Zoom,
+        iterations: this.settings.iterations,
+        palette: this.settings.palette,
+        colorDensity: this.settings.colorDensity,
+        flowSpeed: this.settings.flowSpeed,
+        hueSpin: this.settings.hueSpin,
+        antialias: this.settings.antialias,
+        params: { ...this.settings.params },
+      };
+    }
+  }
+
+  setCategory(category: Category): void {
+    if (this.settings.category === category) return;
+    this.syncActiveModeState();
+    this.settings.category = category;
+
+    if (category === 'visual') {
+      const state = this.visualStates[this.settings.visualMode] ?? defaultVisualState();
+      this.settings.visualParams = { ...state.visualParams };
+      this.settings.palette = state.palette;
+      this.settings.colorDensity = state.colorDensity;
+      this.settings.flowSpeed = state.flowSpeed;
+      this.settings.hueSpin = state.hueSpin;
+    } else {
+      const state = this.fractalStates[this.settings.mode] ?? createDefaultFractalStates()[this.settings.mode];
+      this.settings.iterations = state.iterations;
+      this.settings.palette = state.palette;
+      this.settings.colorDensity = state.colorDensity;
+      this.settings.flowSpeed = state.flowSpeed;
+      this.settings.hueSpin = state.hueSpin;
+      this.settings.antialias = state.antialias;
+      this.settings.params = { ...state.params };
+
+      const ctx = new FixedCtx(FixedCtx.precisionForLog2Zoom(state.z));
+      const cx = ctx.fromString(state.cx);
+      const cy = ctx.fromString(state.cy);
+      this.vp.snapTo(cx, cy, state.z, ctx);
+    }
+
+    this.renderer.setPalette(this.settings.palette);
+    this.stopFlight();
+    this.markDirty();
+    this.save();
+  }
+
+  setFractalMode(mode: FractalMode): void {
+    this.syncActiveModeState();
+    this.settings.category = 'fractal';
+    this.settings.mode = mode;
+
+    const state = this.fractalStates[mode] ?? createDefaultFractalStates()[mode];
+    this.settings.iterations = state.iterations;
+    this.settings.palette = state.palette;
+    this.settings.colorDensity = state.colorDensity;
+    this.settings.flowSpeed = state.flowSpeed;
+    this.settings.hueSpin = state.hueSpin;
+    this.settings.antialias = state.antialias;
+    this.settings.params = { ...state.params };
+
+    const ctx = new FixedCtx(FixedCtx.precisionForLog2Zoom(state.z));
+    const cx = ctx.fromString(state.cx);
+    const cy = ctx.fromString(state.cy);
+    this.vp.snapTo(cx, cy, state.z, ctx);
+
+    this.renderer.setPalette(this.settings.palette);
+    this.stopFlight();
+    this.markDirty();
+    this.save();
+  }
+
+  setVisualMode(mode: VisualMode): void {
+    this.syncActiveModeState();
+    this.settings.category = 'visual';
+    this.settings.visualMode = mode;
+
+    const state = this.visualStates[mode] ?? defaultVisualState();
+    this.settings.visualParams = { ...state.visualParams };
+    this.settings.palette = state.palette;
+    this.settings.colorDensity = state.colorDensity;
+    this.settings.flowSpeed = state.flowSpeed;
+    this.settings.hueSpin = state.hueSpin;
+
+    this.renderer.setPalette(this.settings.palette);
+    this.markDirty();
+    this.save();
   }
 
   toViewState(): ViewState {
@@ -217,10 +350,12 @@ export class App {
     if (animate) this.vp.setTarget(cx, cy, s.z, ctx);
     else this.vp.snapTo(cx, cy, s.z, ctx);
 
+    this.syncActiveModeState();
     this.markDirty();
   }
 
   applyPreset(mode: FractalMode, preset: Preset): void {
+    this.settings.category = 'fractal';
     this.settings.mode = mode;
     if (preset.params) {
       this.settings.params = { ...this.settings.params, ...preset.params };
@@ -231,13 +366,18 @@ export class App {
     const z = radiusToLog2Zoom(preset.radius);
     const ctx = new FixedCtx(FixedCtx.precisionForLog2Zoom(z));
     this.vp.snapTo(ctx.fromString(preset.cx), ctx.fromString(preset.cy), z, ctx);
+
+    this.syncActiveModeState();
     this.markDirty();
+    this.save();
   }
 
   resetView(): void {
     if (this.settings.category === 'visual') {
       this.settings.visualParams = defaultVisualParams();
+      this.syncActiveModeState();
       this.markDirty();
+      this.save();
       return;
     }
     this.applyPreset(this.settings.mode, PRESETS[this.settings.mode][0]);
@@ -250,8 +390,14 @@ export class App {
   /* -------------------------------------------------------------- persist */
 
   save(): void {
+    this.syncActiveModeState();
     try {
-      localStorage.setItem(SESSION_KEY, JSON.stringify(this.toViewState()));
+      const payload = {
+        viewState: this.toViewState(),
+        fractalStates: this.fractalStates,
+        visualStates: this.visualStates,
+      };
+      localStorage.setItem(SESSION_KEY, JSON.stringify(payload));
     } catch {
       /* private browsing, quota — not worth interrupting the user over */
     }
@@ -259,22 +405,39 @@ export class App {
 
   private restore(): void {
     const fromUrl = readHashState(location.hash);
-    if (fromUrl) {
-      this.applyViewState(fromUrl);
-      return;
-    }
     try {
       const raw = localStorage.getItem(SESSION_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw) as ViewState;
-        if (parsed && typeof parsed.cx === 'string') {
-          this.applyViewState(parsed);
-          return;
+        const parsed = JSON.parse(raw);
+        if (parsed) {
+          if (parsed.fractalStates) {
+            this.fractalStates = { ...createDefaultFractalStates(), ...parsed.fractalStates };
+          }
+          if (parsed.visualStates) {
+            this.visualStates = { ...createDefaultVisualStates(), ...parsed.visualStates };
+          }
+
+          if (fromUrl) {
+            this.applyViewState(fromUrl);
+            return;
+          }
+
+          const vs = parsed.viewState ?? parsed;
+          if (vs && typeof vs.cx === 'string') {
+            this.applyViewState(vs as ViewState);
+            return;
+          }
         }
       }
     } catch {
       /* fall through to the default view */
     }
+
+    if (fromUrl) {
+      this.applyViewState(fromUrl);
+      return;
+    }
+
     this.applyPreset('mandelbrot', PRESETS.mandelbrot[0]);
   }
 

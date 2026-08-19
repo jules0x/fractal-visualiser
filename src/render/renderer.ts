@@ -27,6 +27,13 @@ import {
   MODE_RORSCHACH,
   MODE_SIERPINSKI,
   MODE_LIGHTNING,
+  MODE_MULTIPLY_RIDGE,
+  MODE_ISOCONTOUR,
+  MODE_CURL_FLOW,
+  MODE_REACTION_WEB,
+  MODE_ORBIT_TRAP,
+  MODE_CELL_WALL,
+  MODE_TRANSIT_TRAP,
 } from './visualShaders.ts';
 import { buildPaletteLut, paletteById } from './palettes.ts';
 import type { ReferenceOrbit } from '../core/reference.ts';
@@ -56,6 +63,13 @@ export const VISUAL_SHADER_MODE = {
   rorschach: MODE_RORSCHACH,
   sierpinski: MODE_SIERPINSKI,
   lightning: MODE_LIGHTNING,
+  multiplyRidge: MODE_MULTIPLY_RIDGE,
+  isoContour: MODE_ISOCONTOUR,
+  curlFlow: MODE_CURL_FLOW,
+  reactionWeb: MODE_REACTION_WEB,
+  orbitTrap: MODE_ORBIT_TRAP,
+  cellWall: MODE_CELL_WALL,
+  transitTrap: MODE_TRANSIT_TRAP,
 } as const;
 
 /** Reference orbits are laid out row-major in a texture this wide. */

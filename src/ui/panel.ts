@@ -53,8 +53,10 @@ export class Panel {
     const app = this.app;
     const s = () => app.settings;
     const changed = () => {
+      app.syncActiveModeState();
       app.markDirty();
       app.nudge();
+      app.save();
     };
 
     this.sliders = [];
@@ -551,23 +553,19 @@ export class Panel {
 
   setCategory(category: Category): void {
     if (this.app.settings.category === category) return;
-    this.app.settings.category = category;
-    this.app.stopFlight();
-    this.app.markDirty();
+    this.app.setCategory(category);
     this.refreshControls();
   }
 
   setMode(mode: FractalMode): void {
-    if (this.app.settings.mode === mode) return;
-    this.app.settings.mode = mode;
-    this.app.applyPreset(mode, PRESETS[mode][0]);
+    if (this.app.settings.mode === mode && this.app.settings.category === 'fractal') return;
+    this.app.setFractalMode(mode);
     this.refreshControls();
   }
 
   setVisualMode(mode: VisualMode): void {
-    if (this.app.settings.visualMode === mode) return;
-    this.app.settings.visualMode = mode;
-    this.app.markDirty();
+    if (this.app.settings.visualMode === mode && this.app.settings.category === 'visual') return;
+    this.app.setVisualMode(mode);
     this.refreshControls();
   }
 
@@ -584,7 +582,9 @@ export class Panel {
   setPalette(id: string): void {
     this.app.settings.palette = id;
     this.app.renderer.setPalette(id);
+    this.app.syncActiveModeState();
     this.app.markDirty();
+    this.app.save();
     this.syncChrome();
   }
 
@@ -593,7 +593,9 @@ export class Panel {
     this.app.settings.palette = id;
     this.app.settings.hueSpin = spin;
     this.app.renderer.setPalette(id);
+    this.app.syncActiveModeState();
     this.app.markDirty();
+    this.app.save();
     this.syncChrome();
   }
 

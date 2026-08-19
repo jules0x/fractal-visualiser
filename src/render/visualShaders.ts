@@ -32,6 +32,13 @@ export const MODE_ATTRACTOR = 13;
 export const MODE_RORSCHACH = 14;
 export const MODE_SIERPINSKI = 15;
 export const MODE_LIGHTNING = 16;
+export const MODE_MULTIPLY_RIDGE = 17;
+export const MODE_ISOCONTOUR = 18;
+export const MODE_CURL_FLOW = 19;
+export const MODE_REACTION_WEB = 20;
+export const MODE_ORBIT_TRAP = 21;
+export const MODE_CELL_WALL = 22;
+export const MODE_TRANSIT_TRAP = 23;
 
 export const VISUAL_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
@@ -1112,13 +1119,585 @@ vec3 renderLightning(vec2 uv, float t) {
   float fineBolt = ridgeFbm(warped * 3.5 + vec2(-t * u_speed * 0.06, t * u_speed * 0.05),
                             min(oct, 5));
   fineBolt = pow(clamp(fineBolt, 0.0, 1.0), 6.0) * flickerMask * bassBoost;
-  col += palette(tcol + 0.25) * fineBolt * 1.8;
-  col += mix(palette(tcol + 0.30), vec3(1.0), 0.4) * pow(fineBolt, 2.0) * 3.0;
-
-  // Radial vignette.
+    // Radial vignette.
   float vig = smoothstep(1.85, 0.05, r);
   col *= vig;
 
+  return col;
+}
+
+/* ==========================================================================
+ * Curl noise helper: 2D curl of a scalar noise field.
+ * The resulting vector is divergence-free, so its streamlines are closed
+ * loops — similar to magnetic field lines.  Curl = (df/dy, -df/dx).
+ * ========================================================================== */
+vec2 curlNoise(vec2 p, float drift) {
+  float eps = 0.003;
+  float n1 = snoise(p + vec2(0.0,  eps) + vec2(0.0, drift));
+  float n2 = snoise(p - vec2(0.0,  eps) + vec2(0.0, drift));
+  float n3 = snoise(p + vec2(eps,  0.0) + vec2(0.0, drift));
+  float n4 = snoise(p - vec2(eps,  0.0) + vec2(0.0, drift));
+  return vec2((n1 - n2) / (2.0 * eps), -(n3 - n4) / (2.0 * eps));
+}
+
+/* ==========================================================================
+ * Multiply Ridge — two ridged FBM fields multiplied together.
+ *
+ * The PRODUCT is only bright where BOTH fields have a ridge simultaneously,
+ * giving isolated, razor-thin filaments on a truly black background.
+ * A small frequency offset between the two fields (1.07x) introduces a
+ * beat/interference fringe that creates large-scale moiré structure on top
+ * of the fine ridges.  Power-law sharpening (exponent up to ~12 via the
+ * Complexity slider) makes dark areas absolutely black.
+ * ========================================================================== */
+vec3 renderMultiplyRidge(vec2 uv, float t) {
+  float bass   = u_audioBands.x;
+  float treble = u_audioBands.z;
+
+  float folds = max(2.0, floor(u_symmetry));
+  float seg   = 6.28318530718 / folds;
+  float r = length(uv);
+  float a = atan(uv.y, uv.x);
+  float af = mod(a, seg);
+  af = abs(af - seg * 0.5);
+  vec2 p = vec2(cos(af), sin(af)) * r;
+
+  int oct = clamp(int(u_complexity), 2, 8);
+
+  float wx = snoise(p * 0.8 + vec2(t * u_speed * 0.10,  0.3));
+  float wy = snoise(p * 0.8 + vec2(0.3, -t * u_speed * 0.09));
+  vec2 warped = p + vec2(wx, wy) * u_warp * 0.4;
+
+  // Field 1: base frequency
+  float f1 = ridgeFbm(warped * 1.8 + vec2(t * u_speed * 0.04, 0.0), oct);
+  // Field 2: 1.07x frequency creates beat interference fringe
+  float f2 = ridgeFbm(warped * 1.8 * 1.07 + vec2(0.0, t * u_speed * 0.035), oct);
+
+  // Gain-boosted product: sharp intersections without collapsing to zero
+  float combined = clamp(f1 * f2 * 2.5, 0.0, 1.0);
+
+  // Power-law steepening: crisp glowing lines
+  float sharpness = 1.8 + u_complexity * 0.35 + bass * 0.4;
+  float bolt = pow(combined, sharpness);
+
+  // Background/volume field: single-ridge blend prevents total darkness
+  float ambientVol = clamp((f1 + f2) * 0.45, 0.0, 1.0);
+  float volumeGlow = pow(ambientVol, 2.0) * 0.35;
+
+  // Fine detail layer
+  float fine = ridgeFbm(warped * 3.8 + vec2(-t * u_speed * 0.06, t * u_speed * 0.05), min(oct, 6));
+  float fineBolt = pow(clamp(f1 * fine * 2.0, 0.0, 1.0), sharpness * 1.3);
+
+  // Corona halo around the main structure
+  float halo = pow(clamp(combined * 1.2, 0.0, 1.0), 1.2) * 0.45;
+
+  float tcol = (combined * 0.5 + ambientVol * 0.3 + u_flowPhase + u_audioLevel * 0.2) * u_colorDensity;
+
+  // Rich base color output
+  vec3 col = palette(tcol) * (0.08 + volumeGlow * 0.6);
+  col += palette(tcol + 0.08) * halo * 2.8;
+  col += palette(tcol + 0.15) * bolt * 5.0;
+  col += mix(palette(tcol + 0.22), vec3(1.0), 0.65) * pow(bolt, 1.8) * 9.0;
+  col += palette(tcol + 0.28) * fineBolt * 3.5;
+  col += mix(palette(tcol + 0.35), vec3(1.0), 0.80) * pow(fineBolt, 2.2) * 7.0;
+
+  col *= smoothstep(1.9, 0.05, r);
+  return col;
+}
+
+/* ==========================================================================
+ * Iso-Contour — gradient-magnitude contour lines.
+ *
+ * Instead of ridged FBM (which finds noise peaks), we compute the finite-
+ * difference gradient of regular FBM and threshold it.  The result is
+ * mathematically exact level-set contour lines: every contour has uniform
+ * width and there is zero spatial bias.  Two frequencies at a small offset
+ * (beat ratio controlled by Warp) produce a drifting interference fringe
+ * that adds large-scale depth to the engraved appearance.
+ * ========================================================================== */
+vec3 renderIsoContour(vec2 uv, float t) {
+  float bass   = u_audioBands.x;
+  float treble = u_audioBands.z;
+
+  float folds = max(2.0, floor(u_symmetry));
+  float seg   = 6.28318530718 / folds;
+  float r = length(uv);
+  float a = atan(uv.y, uv.x);
+  float af = mod(a, seg);
+  af = abs(af - seg * 0.5);
+  vec2 p = vec2(cos(af), sin(af)) * r;
+
+  int oct = clamp(int(u_complexity), 2, 8);
+
+  float wx = snoise(p * 1.0 + vec2(t * u_speed * 0.08,  0.0));
+  float wy = snoise(p * 1.0 + vec2(0.0, -t * u_speed * 0.07));
+  vec2 warped = p + vec2(wx, wy) * u_warp * 0.35;
+
+  // Central sample + two neighbours for gradient estimation.
+  float ieps = 0.005;
+  vec2 wt = vec2(t * u_speed * 0.04, 0.0);
+  float n0 = fbm(warped * 2.0 + wt, oct);
+  float nx = fbm((warped + vec2(ieps, 0.0)) * 2.0 + wt, oct);
+  float ny = fbm((warped + vec2(0.0, ieps)) * 2.0 + wt, oct);
+  float gradMag = length(vec2(nx - n0, ny - n0)) / ieps;
+
+  // Primary iso-lines and a beat frequency offset.
+  float freq1 = 3.0 + u_complexity * 0.8;
+  float freq2 = freq1 * (1.0 + u_warp * 0.12);
+
+  float lw   = 0.04 + treble * 0.02;
+  float line1 = 1.0 - smoothstep(0.0, lw,
+                  abs(fract(n0 * freq1 + t * u_speed * 0.10) - 0.5));
+  float line2 = 1.0 - smoothstep(0.0, lw * 0.6,
+                  abs(fract(n0 * freq2 - t * u_speed * 0.08) - 0.5));
+
+  float field   = line1 * (1.0 + bass * 0.6) + line2 * 0.45;
+  float gradEnh = clamp(gradMag * 0.3, 0.0, 1.0) * field;
+  float halo    = pow(clamp(line1 * 0.5 + line2 * 0.3, 0.0, 1.0), 2.0) * 0.15;
+
+  float tcol = (n0 * 0.5 + 0.5 + u_flowPhase + u_audioLevel * 0.2) * u_colorDensity;
+
+  vec3 col = palette(tcol) * 0.04;
+  col += palette(tcol + 0.07) * halo * 2.0;
+  col += palette(tcol + 0.13) * field * 3.5;
+  col += mix(palette(tcol + 0.19), vec3(1.0), 0.45) * pow(field, 2.0) * 5.5;
+  col += palette(tcol + 0.25) * gradEnh * 2.5;
+
+  col *= smoothstep(1.9, 0.1, r);
+  return col;
+}
+
+/* ==========================================================================
+ * Curl Flow — divergence-free flow-line patterns.
+ *
+ * The curl (perpendicular gradient) of a scalar noise field is divergence-
+ * free: its streamlines are closed loops, like magnetic field lines around
+ * a wire or ocean gyres.  We modulate a ridged FBM with the curl magnitude
+ * so the pattern follows these closed orbits rather than blobbily spreading.
+ * A secondary curl at 2.3x scale adds fine filamentation.
+ * ========================================================================== */
+vec3 renderCurlFlow(vec2 uv, float t) {
+  float bass   = u_audioBands.x;
+  float treble = u_audioBands.z;
+
+  float folds = max(2.0, floor(u_symmetry));
+  float seg   = 6.28318530718 / folds;
+  float r = length(uv);
+  float a = atan(uv.y, uv.x);
+  float af = mod(a, seg);
+  af = abs(af - seg * 0.5);
+  vec2 p = vec2(cos(af), sin(af)) * r;
+
+  int oct = clamp(int(u_complexity), 2, 8);
+  float spd = u_speed * 0.10;
+
+  // Primary curl at base scale.
+  vec2 curl1 = curlNoise(p * 1.4 * (1.0 + u_warp * 0.25), t * spd);
+  float curlMag1 = length(curl1);
+  vec2 curlDir1  = curlMag1 > 0.001 ? curl1 / curlMag1 : vec2(1.0, 0.0);
+
+  // Advect a ridged FBM along the curl flow lines.
+  vec2 adv1  = p + curlDir1 * u_warp * 0.25 + vec2(t * spd * 0.3, 0.0);
+  float ridge1 = ridgeFbm(adv1 * 2.0, oct);
+
+  // Secondary curl at finer scale for sub-structure.
+  vec2 curl2    = curlNoise(p * 3.2 + vec2(5.1, 2.7), t * spd * 0.7);
+  float curlMag2 = length(curl2);
+
+  // Field: ridge amplitude modulated by local curl magnitude.
+  float field = ridge1 * (0.5 + clamp(curlMag1, 0.0, 1.0) * 0.5);
+  float bolt  = pow(clamp(field, 0.0, 1.0), 3.5 + u_complexity * 0.4);
+
+  // Fine curl filaments from secondary layer.
+  float fine = pow(clamp(curlMag2 * 0.7, 0.0, 1.0), 2.5)
+               * (0.3 + bass * 0.25 + treble * 0.1);
+
+  float halo = pow(clamp(field, 0.0, 1.0), 1.3) * 0.18;
+
+  float tcol = (curlMag1 * 0.35 + field * 0.35 + u_flowPhase + u_audioLevel * 0.2) * u_colorDensity;
+
+  vec3 col = palette(tcol) * 0.04;
+  col += palette(tcol + 0.08) * halo * 2.2;
+  col += palette(tcol + 0.15) * bolt * 4.5;
+  col += mix(palette(tcol + 0.21), vec3(1.0), 0.50) * pow(bolt, 1.8) * 6.5;
+  col += palette(tcol + 0.27) * fine * 2.2;
+
+  col *= smoothstep(1.9, 0.05, r);
+  return col;
+}
+
+/* ==========================================================================
+ * Reaction Web — approximate Turing / reaction-diffusion patterns.
+ *
+ * True Gray-Scott requires a framebuffer; we approximate it by sampling FBM
+ * at two very different scales.  The fine-scale activator wants to spot;
+ * the coarse-scale inhibitor supplies a spatially-varying threshold that
+ * breaks the pattern into organic cells.  The cell BOUNDARY (where
+ * activator ~ threshold) is found via smoothstep and sharpened with a
+ * finite-difference gradient — giving paper-thin glowing cell walls with
+ * true darkness inside each cell, exactly like diatom skeletons or soap
+ * foam.
+ * ========================================================================== */
+vec3 renderReactionWeb(vec2 uv, float t) {
+  float bass   = u_audioBands.x;
+  float treble = u_audioBands.z;
+
+  float folds = max(2.0, floor(u_symmetry));
+  float seg   = 6.28318530718 / folds;
+  float r = length(uv);
+  float a = atan(uv.y, uv.x);
+  float af = mod(a, seg);
+  af = abs(af - seg * 0.5);
+  vec2 p = vec2(cos(af), sin(af)) * r;
+
+  int oct = clamp(int(u_complexity), 2, 8);
+  float drift = t * u_speed * 0.055;
+
+  // Activator: fine scale, drifts quickly.
+  float fineScale = 3.5 + u_complexity * 0.4;
+  vec2 pA = p * fineScale + vec2(drift, 0.0);
+  // Non-linear self-warp creates the Turing instability (cells of varying size).
+  float selfWarp = snoise(pA * 0.45 - vec2(0.0, drift * 0.6)) * u_warp * 0.5;
+  pA += selfWarp;
+  float activator = fbm(pA, oct) * 0.5 + 0.5;
+
+  // Inhibitor: coarse scale, slow drift — sets spatially-varying threshold.
+  float coarseScale = fineScale * 0.32;
+  vec2 pI = p * coarseScale - vec2(0.0, drift * 0.7);
+  float inhibitor = fbm(pI, max(oct - 1, 1)) * 0.5 + 0.5;
+
+  // Signed distance to the cell boundary.
+  float threshold  = inhibitor * (0.55 + u_warp * 0.2);
+  float signedDist = activator - threshold;
+
+  float bw       = 0.07 + treble * 0.05;
+  float boundary = 1.0 - smoothstep(0.0, bw, abs(signedDist));
+  float interior = smoothstep(0.04, 0.18, signedDist);
+
+  // Gradient sharpening: peaks exactly on the cell wall.
+  float reps = 0.004;
+  float aL = fbm((p + vec2(-reps, 0.0)) * fineScale + vec2(drift, 0.0), oct) * 0.5 + 0.5;
+  float aR = fbm((p + vec2( reps, 0.0)) * fineScale + vec2(drift, 0.0), oct) * 0.5 + 0.5;
+  float aU = fbm((p + vec2(0.0,  reps)) * fineScale + vec2(drift, 0.0), oct) * 0.5 + 0.5;
+  float aD = fbm((p - vec2(0.0,  reps)) * fineScale + vec2(drift, 0.0), oct) * 0.5 + 0.5;
+  float wallGrad = length(vec2(aR - aL, aU - aD)) / (2.0 * reps);
+  float sharpWall = boundary * clamp(wallGrad * 0.5, 0.0, 2.0);
+
+  float tcol = (activator * 0.4 + inhibitor * 0.25 + u_flowPhase + u_audioLevel * 0.2) * u_colorDensity;
+
+  vec3 col = palette(tcol) * interior * 0.22;
+  col += palette(tcol + 0.30) * (1.0 - interior) * 0.07;
+  col += palette(tcol + 0.14) * boundary * 2.8;
+  col += mix(palette(tcol + 0.21), vec3(1.0), 0.40)
+         * sharpWall * (3.5 + bass * 1.2);
+  col += palette(tcol + 0.08) * sharpWall * (1.2 + bass * 0.6);
+
+  col *= smoothstep(1.9, 0.1, r);
+  return col;
+}
+
+/* ==========================================================================
+ * Orbit Trap — Julia set with geometric trap coloring.
+ *
+ * We iterate z -> z^2 + c (Julia set) directly in the shader and track the
+ * MINIMUM DISTANCE each orbit comes to three geometric shapes: a unit ring,
+ * the two coordinate axes (a cross), and the origin (a point).  The trap
+ * distance replaces the escape count as the color value.  Because we color
+ * by proximity to a geometric feature rather than iteration depth, we get
+ * sharp geometric SHAPES embedded recursively inside the Julia set — the
+ * same branching fractal structure but expressed as neon lines rather than
+ * coloured regions.  Complexity blends between the three trap types.
+ * ========================================================================== */
+vec3 renderOrbitTrap(vec2 uv, float t) {
+  float bass   = u_audioBands.x;
+  float treble = u_audioBands.z;
+
+  // Slow rotation so the pattern never goes completely static.
+  float ang = t * u_speed * 0.07;
+  float ca = cos(ang), sa = sin(ang);
+  vec2 ruv = vec2(uv.x * ca - uv.y * sa, uv.x * sa + uv.y * ca);
+
+  float scale = 2.5 * (1.0 + u_warp * 0.18);
+  vec2 z0 = ruv * scale;
+
+  // Julia constant orbiting slowly through interesting parameter space.
+  float jt  = t * u_speed * 0.11;
+  float jr  = 0.75 + u_warp * 0.15;
+  vec2 jc   = vec2(jr * cos(jt * 0.7 + 0.5), jr * sin(jt * 0.5 + 1.2));
+
+  int maxIt    = clamp(int(u_complexity) * 6 + 6, 6, 60);
+  const float BAIL = 4.0;
+
+  float trapRing  = 1e9;
+  float trapCross = 1e9;
+  float trapPoint = 1e9;
+  bool  escaped   = false;
+  float smoothIt  = float(maxIt);
+  vec2  zi        = z0;
+
+  for (int oi = 0; oi < 60; oi++) {
+    if (oi >= maxIt) break;
+    zi = vec2(zi.x * zi.x - zi.y * zi.y, 2.0 * zi.x * zi.y) + jc;
+    float mag2 = dot(zi, zi);
+    float mag  = sqrt(mag2);
+    trapRing   = min(trapRing,  abs(mag - 1.0));
+    trapCross  = min(trapCross, min(abs(zi.x), abs(zi.y)));
+    trapPoint  = min(trapPoint, mag);
+    if (mag2 > BAIL * BAIL) {
+      smoothIt = float(oi) + 1.0
+                 - log(log(mag) / log(BAIL)) / log(2.0);
+      escaped = true;
+      break;
+    }
+  }
+
+  // Blend trap types by complexity: ring -> cross -> point.
+  float bl01 = clamp(u_complexity / 3.0 - 0.5, 0.0, 1.0);
+  float bl12 = clamp(u_complexity / 3.0 - 1.5, 0.0, 1.0);
+  float trap  = mix(mix(trapRing, trapCross, bl01), trapPoint, bl12);
+  trap        = clamp(trap * 1.5, 0.0, 1.0);
+
+  float tlw  = 0.045 + treble * 0.03;
+  float line = 1.0 - smoothstep(0.0, tlw, trap);
+  float ring = 1.0 - smoothstep(0.0, tlw * 0.5, abs(trap - 0.15));
+
+  float depth = smoothIt / float(maxIt);
+  float tcol  = (trap * 0.4 + depth * 0.3 + u_flowPhase + u_audioLevel * 0.2) * u_colorDensity;
+  float halo  = pow(clamp(1.0 - trap, 0.0, 1.0), 3.0) * 0.18;
+
+  vec3 col = palette(tcol) * 0.05;
+  col += palette(tcol + 0.08) * halo * 2.2;
+  col += palette(tcol + 0.15) * line * 4.5;
+  col += mix(palette(tcol + 0.21), vec3(1.0), 0.50) * pow(line, 2.0) * 7.0;
+  col += palette(tcol + 0.27) * ring * 3.5;
+  col += mix(palette(tcol + 0.33), vec3(1.0), 0.40) * pow(ring, 2.0) * 5.0;
+
+  col *= smoothstep(1.9, 0.1, length(uv));
+  return col;
+}
+
+/* ==========================================================================
+ * Cell Wall — Voronoi cell-boundary gradient rendering.
+ *
+ * Rather than coloring each Voronoi cell by its distance to its seed (which
+ * fills cells with colour), we color by the GRADIENT of the cell-distance
+ * field — which is zero deep inside any cell and spikes to a maximum
+ * exactly on the boundary between two cells.  This gives paper-thin glowing
+ * walls with total darkness inside and outside, exactly like an insect wing,
+ * a leaf vein network, or a cracked glaze.  A second Voronoi layer at 2.3x
+ * finer scale adds secondary veins; their intersections multiply together
+ * for a white-hot highlight at every junction.
+ * ========================================================================== */
+vec3 renderCellWall(vec2 uv, float t) {
+  float bass   = u_audioBands.x;
+  float treble = u_audioBands.z;
+
+  float folds = max(2.0, floor(u_symmetry));
+  float seg   = 6.28318530718 / folds;
+  float r = length(uv);
+  float a = atan(uv.y, uv.x);
+  float af = mod(a, seg);
+  af = abs(af - seg * 0.5);
+  vec2 p = vec2(cos(af), sin(af)) * r;
+
+  float wx = snoise(p * 0.85 + vec2(t * u_speed * 0.06,  0.0));
+  float wy = snoise(p * 0.85 + vec2(0.0, -t * u_speed * 0.05));
+  vec2 pw = p + vec2(wx, wy) * u_warp * 0.30;
+
+  float cellScale1 = 1.8 + u_complexity * 0.30;
+  float cellScale2 = cellScale1 * 2.3;
+
+  // Primary Voronoi: edge distance = distance to nearest boundary.
+  vec2 pv1  = pw * cellScale1;
+  vec2 pi1  = floor(pv1);
+  vec2 pf1  = fract(pv1) - 0.5;
+  float md1a = 1e9, md1b = 1e9;
+  vec2 near1 = vec2(0.0);
+  for (int dx1 = -1; dx1 <= 1; dx1++) {
+    for (int dy1 = -1; dy1 <= 1; dy1++) {
+      vec2 nb = vec2(float(dx1), float(dy1));
+      vec2 h  = voronoiHash(pi1 + nb);
+      h = 0.5 + 0.5 * sin(h * 6.28318 + t * u_speed * 0.30);
+      vec2 diff = nb - pf1 + h;
+      float d = dot(diff, diff);
+      if (d < md1a) { md1b = md1a; md1a = d; near1 = h; }
+      else if (d < md1b) { md1b = d; }
+    }
+  }
+  float edge1 = sqrt(md1b) - sqrt(md1a);
+
+  // Secondary finer Voronoi for the sub-vein network.
+  vec2 pv2  = pw * cellScale2;
+  vec2 pi2  = floor(pv2);
+  vec2 pf2  = fract(pv2) - 0.5;
+  float md2a = 1e9, md2b = 1e9;
+  vec2 near2 = vec2(0.0);
+  for (int dx2 = -1; dx2 <= 1; dx2++) {
+    for (int dy2 = -1; dy2 <= 1; dy2++) {
+      vec2 nb = vec2(float(dx2), float(dy2));
+      vec2 h  = voronoiHash(pi2 + nb + vec2(17.3, 31.7));
+      h = 0.5 + 0.5 * sin(h * 6.28318 + t * u_speed * 0.40 + 1.5);
+      vec2 diff = nb - pf2 + h;
+      float d = dot(diff, diff);
+      if (d < md2a) { md2b = md2a; md2a = d; near2 = h; }
+      else if (d < md2b) { md2b = d; }
+    }
+  }
+  float edge2 = sqrt(md2b) - sqrt(md2a);
+
+  float ww   = 0.05 + treble * 0.04;
+  float wall1 = 1.0 - smoothstep(0.0, ww,        edge1);
+  float wall2 = 1.0 - smoothstep(0.0, ww * 0.55, edge2);
+
+  // Power-law steepening: pure black interior, brilliant wall.
+  float shp  = 2.5 + u_complexity * 0.4;
+  wall1 = pow(wall1, shp);
+  wall2 = pow(wall2, shp);
+
+  // Intersection: white-hot where both wall layers coincide.
+  float xsect = wall1 * wall2 * (1.5 + bass * 1.0);
+
+  float tcol = (near1.x * 0.4 + near2.x * 0.2 + u_flowPhase + u_audioLevel * 0.2) * u_colorDensity;
+
+  vec3 col = palette(tcol) * 0.04;
+  col += palette(tcol + 0.10) * wall1 * 3.0;
+  col += palette(tcol + 0.18) * wall2 * 2.2;
+  col += mix(palette(tcol + 0.24), vec3(1.0), 0.52) * xsect * 6.0;
+  col += palette(tcol + 0.32) * pow(wall1, 2.0) * 3.5;
+
+  col *= smoothstep(1.9, 0.1, r);
+  return col;
+}
+
+/* ==========================================================================
+ * Transit Trap — Dual Julia orbit traps with adaptive transit deceleration.
+ *
+ * Two complementary Julia seeds (jcA and jcB) move in counter-phase orbits.
+ * As they approach each other ("near transit"), an analytical time-warp function
+ * smoothly decelerates the time step to 0.08x speed, dwelling on the intricate
+ * interlock and magnetic filamentation between the two halves.
+ * Out of transit, time fast-forwards at 3.2x speed through concentric ring traps
+ * so there are no dull or empty moments.
+ * ========================================================================== */
+/* ==========================================================================
+ * Transit Trap — Dual Julia orbit traps with plateau time-warping.
+ *
+ * Spends 75%+ of the cycle dwelling inside the preferred transit interlock
+ * state (the glowing filigree crown), transitioning quickly between peaks
+ * so you can admire, tweak, and snapshot the sweet spot without it fading.
+ * ========================================================================== */
+vec3 renderTransitTrap(vec2 uv, float t) {
+  float bass   = u_audioBands.x;
+  float treble = u_audioBands.z;
+
+  float folds = max(1.0, floor(u_symmetry));
+  float seg   = 6.28318530718 / folds;
+
+  float r = length(uv);
+  float a = atan(uv.y, uv.x);
+  float af = mod(a, seg);
+  af = abs(af - seg * 0.5);
+  vec2 p = vec2(cos(af), sin(af)) * r;
+
+  // Time parameter with slow fundamental rate
+  float tPhase = t * u_speed * 0.08;
+
+  // Plateau time-warp: raising sine/cosine to power 0.28 flattens the peak,
+  // making 75%+ of the animation cycle dwell right at the peak transit state!
+  float s1 = sin(tPhase);
+  float c1 = cos(tPhase * 0.75 + 0.4);
+
+  float dwellS = sign(s1) * pow(abs(s1), 0.28);
+  float dwellC = sign(c1) * pow(abs(c1), 0.28);
+
+  // Twin Julia seeds positioned right at the sweet-spot parameter radius (~0.65)
+  float orbR = 0.65 + 0.08 * sin(tPhase * 0.5);
+  vec2 jcA = vec2(orbR * dwellC, orbR * dwellS);
+  vec2 jcB = vec2(-orbR * dwellC, -orbR * dwellS);
+
+  // Interpolated seed for Julia evaluation
+  vec2 jc = mix(jcA, jcB, 0.5 + 0.35 * dwellS);
+
+  float scale = 2.3 * (1.0 + u_warp * 0.15);
+  vec2 z0 = p * scale;
+
+  int maxIt = clamp(int(u_complexity) * 7 + 4, 4, 60);
+  const float BAIL = 4.0;
+
+  float trapPoint = 1e9;
+  float trapRing = 1e9;
+  float trapCross = 1e9;
+  float trapBridge = 1e9;
+  bool escaped = false;
+  float smoothIt = float(maxIt);
+  vec2 zi = z0;
+
+  for (int oi = 0; oi < 60; oi++) {
+    if (oi >= maxIt) break;
+    zi = vec2(zi.x * zi.x - zi.y * zi.y, 2.0 * zi.x * zi.y) + jc;
+    float mag2 = dot(zi, zi);
+    float mag = sqrt(mag2);
+
+    float dA = length(zi - jcA);
+    float dB = length(zi - jcB);
+    float dMin = min(dA, dB);
+
+    // Trap 1: Point proximity to seeds
+    trapPoint = min(trapPoint, dMin);
+
+    // Trap 2: Concentric rings around seeds
+    float rA = abs(dA - 0.45);
+    float rB = abs(dB - 0.45);
+    trapRing = min(trapRing, min(rA, rB));
+
+    // Trap 3: Cross axes through seeds
+    vec2 diffA = abs(zi - jcA);
+    vec2 diffB = abs(zi - jcB);
+    trapCross = min(trapCross, min(min(diffA.x, diffA.y), min(diffB.x, diffB.y)));
+
+    // Trap 4: Connecting transit bridge beam between jcA and jcB
+    vec2 ab = jcB - jcA;
+    float tSeg = clamp(dot(zi - jcA, ab) / max(1e-5, dot(ab, ab)), 0.0, 1.0);
+    float dBridge = length(zi - (jcA + tSeg * ab));
+    trapBridge = min(trapBridge, dBridge);
+
+    if (mag2 > BAIL * BAIL) {
+      smoothIt = float(oi) + 1.0 - log(log(mag) / log(BAIL)) / log(2.0);
+      escaped = true;
+      break;
+    }
+  }
+
+  // Combine traps: blend rings, bridge and cross traps for continuous glowing geometry
+  float trapOut = mix(trapRing, trapPoint, 0.4);
+  float trapIn = mix(min(trapPoint, trapBridge), trapCross, 0.3);
+  
+  // Dwell factor: 1.0 when at peak transit
+  float dwellFactor = abs(dwellS * dwellC);
+  float trapFinal = mix(trapOut, trapIn, dwellFactor);
+  trapFinal = clamp(trapFinal * 1.5, 0.0, 1.0);
+
+  // Line width: sharp glowing neon edges matching the user's screenshot
+  float lw = (0.042 + treble * 0.03) * (0.75 + 0.25 * (1.0 - dwellFactor));
+  float line = 1.0 - smoothstep(0.0, lw, trapFinal);
+  float coreLine = 1.0 - smoothstep(0.0, lw * 0.35, trapFinal);
+
+  // Flare multiplier during peak transit
+  float transitFlare = dwellFactor * (1.5 + bass * 1.8);
+
+  float depth = smoothIt / float(maxIt);
+  float tcol = (trapFinal * 0.4 + depth * 0.3 + u_flowPhase + u_audioLevel * 0.2) * u_colorDensity;
+  float halo = pow(clamp(1.0 - trapFinal, 0.0, 1.0), 2.8) * (0.22 + 0.35 * transitFlare);
+
+  vec3 col = palette(tcol) * 0.05;
+  col += palette(tcol + 0.08) * halo * 2.5;
+  col += palette(tcol + 0.15) * line * (3.5 + 2.5 * dwellFactor);
+  col += mix(palette(tcol + 0.22), vec3(1.0), 0.55 + 0.3 * transitFlare)
+         * pow(line, 2.0) * (6.0 + 8.0 * transitFlare);
+  col += mix(palette(tcol + 0.30), vec3(1.0), 0.82)
+         * pow(coreLine, 3.0) * (8.0 + 12.0 * transitFlare);
+
+  col *= smoothstep(1.9, 0.1, r);
   return col;
 }
 
@@ -1143,7 +1722,14 @@ vec3 sampleVisual(vec2 fragPos) {
   else if (u_vmode == ${MODE_ATTRACTOR}) return renderAttractor(uv, u_time);
   else if (u_vmode == ${MODE_RORSCHACH}) return renderRorschach(uv, u_time);
   else if (u_vmode == ${MODE_SIERPINSKI}) return renderSierpinski(uv, u_time);
-  else return renderLightning(uv, u_time);
+  else if (u_vmode == ${MODE_LIGHTNING}) return renderLightning(uv, u_time);
+  else if (u_vmode == ${MODE_MULTIPLY_RIDGE}) return renderMultiplyRidge(uv, u_time);
+  else if (u_vmode == ${MODE_ISOCONTOUR}) return renderIsoContour(uv, u_time);
+  else if (u_vmode == ${MODE_CURL_FLOW}) return renderCurlFlow(uv, u_time);
+  else if (u_vmode == ${MODE_REACTION_WEB}) return renderReactionWeb(uv, u_time);
+  else if (u_vmode == ${MODE_ORBIT_TRAP}) return renderOrbitTrap(uv, u_time);
+  else if (u_vmode == ${MODE_CELL_WALL}) return renderCellWall(uv, u_time);
+  else return renderTransitTrap(uv, u_time);
 }
 
 void main() {
