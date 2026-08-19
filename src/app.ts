@@ -498,26 +498,6 @@ export class App {
     });
   }
 
-  private drawVisualFrame(): void {
-    const { visualMode, visualParams } = this.settings;
-    this.renderer.drawVisual({
-      // Falls back to Flow Field if a saved link names a mode that no longer
-      // exists, rather than handing the renderer an undefined uniform value.
-      vmode: VISUAL_SHADER_MODE[visualMode] ?? VISUAL_SHADER_MODE.flow,
-      time: this.visualTime,
-      speed: visualParams.speed,
-      warp: visualParams.warp,
-      complexity: visualParams.complexity,
-      symmetry: visualParams.symmetry,
-      zoom: visualParams.zoom,
-      colorDensity: this.settings.colorDensity,
-      flowPhase: this.flowPhase,
-      hueSpin: this.hueSpinPhase,
-      // Dynamic audio level and bands mapping
-      audioLevel: 0,
-      audioBands: [0, 0, 0],
-    });
-  }
 
   async toggleAudio(): Promise<boolean> {
     if (this.audioEnabled) {

@@ -229,7 +229,7 @@ export function attachInput(app: App, canvas: HTMLCanvasElement, panel: Panel): 
         if (visual) panel.setVisualMode('nebula');
         break;
       case '9':
-        if (visual) panel.setVisualMode('cascade');
+        if (visual) panel.setVisualMode('spiral');
         break;
       case 'v':
         panel.setCategory(visual ? 'fractal' : 'visual');

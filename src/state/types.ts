@@ -17,9 +17,9 @@ export type Category = 'fractal' | 'visual';
  * handful of sliders, which is also the surface a future audio input would
  * drive: see `u_audioLevel` / `u_audioBands` in visualShaders.ts.
  */
-export type VisualMode = 'flow' | 'plasma' | 'kaleido' | 'mandala' | 'cosmic' | 'tunnel' | 'cybergrid' | 'nebula' | 'spiral';
+export type VisualMode = 'flow' | 'plasma' | 'kaleido' | 'mandala' | 'cosmic' | 'tunnel' | 'cybergrid' | 'nebula' | 'spiral' | 'droste' | 'phyllotaxis' | 'domain' | 'voronoi' | 'attractor' | 'rorschach' | 'sierpinski' | 'lightning';
 
-export const VISUAL_MODES: readonly VisualMode[] = ['flow', 'plasma', 'kaleido', 'mandala', 'cosmic', 'tunnel', 'cybergrid', 'nebula', 'spiral'];
+export const VISUAL_MODES: readonly VisualMode[] = ['flow', 'plasma', 'kaleido', 'mandala', 'cosmic', 'tunnel', 'cybergrid', 'nebula', 'spiral', 'droste', 'phyllotaxis', 'domain', 'voronoi', 'attractor', 'rorschach', 'sierpinski', 'lightning'];
 
 export const VISUAL_MODE_LABELS: Record<VisualMode, string> = {
   flow: 'Flow Field',
@@ -31,6 +31,14 @@ export const VISUAL_MODE_LABELS: Record<VisualMode, string> = {
   cybergrid: 'Cyber Grid',
   nebula: 'Liquid Nebula',
   spiral: 'Spiral Mandala',
+  droste: 'Droste Mirror',
+  phyllotaxis: 'Sunflower',
+  domain: 'Domain Coloring',
+  voronoi: 'Voronoi Glass',
+  attractor: 'Strange Attractor',
+  rorschach: 'Biomorph',
+  sierpinski: 'Sierpiński',
+  lightning: 'Lightning',
 };
 
 export interface ModeParams {

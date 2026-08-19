@@ -19,6 +19,14 @@ import {
   MODE_COSMIC,
   MODE_NEBULA,
   MODE_SPIRAL,
+  MODE_DROSTE,
+  MODE_PHYLLOTAXIS,
+  MODE_DOMAIN,
+  MODE_VORONOI,
+  MODE_ATTRACTOR,
+  MODE_RORSCHACH,
+  MODE_SIERPINSKI,
+  MODE_LIGHTNING,
 } from './visualShaders.ts';
 import { buildPaletteLut, paletteById } from './palettes.ts';
 import type { ReferenceOrbit } from '../core/reference.ts';
@@ -40,6 +48,14 @@ export const VISUAL_SHADER_MODE = {
   cybergrid: MODE_CYBERGRID,
   nebula: MODE_NEBULA,
   spiral: MODE_SPIRAL,
+  droste: MODE_DROSTE,
+  phyllotaxis: MODE_PHYLLOTAXIS,
+  domain: MODE_DOMAIN,
+  voronoi: MODE_VORONOI,
+  attractor: MODE_ATTRACTOR,
+  rorschach: MODE_RORSCHACH,
+  sierpinski: MODE_SIERPINSKI,
+  lightning: MODE_LIGHTNING,
 } as const;
 
 /** Reference orbits are laid out row-major in a texture this wide. */
